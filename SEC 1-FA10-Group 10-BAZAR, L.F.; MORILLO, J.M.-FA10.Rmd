@@ -1,0 +1,85 @@
+---
+title: "FA10"
+author: "MORILLO, JADE MARCO & BAZAR, LINDSAY FAITH"
+date: "2024-11-26"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r cholesterol, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(car)
+library(afex)
+library(emmeans)
+
+data <- read.csv("Cholesterol_R2.csv")
+
+head(data)
+
+data_long <- data %>%
+  pivot_longer(
+    cols = starts_with("After"), 
+    names_to = "Time",           
+    values_to = "Cholesterol"    
+  ) %>%
+  mutate(
+    Time = factor(Time, levels = c("Before", "After4weeks", "After8weeks")),
+    Margarine = as.factor(Margarine),
+    ID = as.factor(ID)
+  )
+
+head(data_long)
+
+summary_stats <- data_long %>%
+  group_by(Margarine, Time) %>%
+  summarize(
+    Mean = mean(Cholesterol, na.rm = TRUE),
+    SD = sd(Cholesterol, na.rm = TRUE),
+    n = n()
+  )
+
+summary_stats
+
+anova_results <- aov_ez(
+  id = "ID", 
+  dv = "Cholesterol", 
+  data = data_long, 
+  within = "Time", 
+  between = "Margarine"
+)
+
+anova_results
+
+anova_table <- as.data.frame(anova_results$anova_table)
+
+if (anova_results$anova_table["Margarine:Time", "Pr(>F)"] < 0.05) {
+  post_hoc <- emmeans(anova_results, ~ Margarine | Time)
+  post_hoc_results <- pairs(post_hoc)
+  
+  post_hoc_results
+}
+
+apa_report <- paste0(
+  "A two-way mixed ANOVA was conducted to examine the effect of margarine brands (Brand A and Brand B) and time (three time points) on cholesterol levels. ",
+  "The main effect of Margarine was ", 
+  ifelse(anova_results$anova_table["Margarine", "Pr(>F)"] < 0.05, "significant", "not significant"), 
+  " (F(", anova_results$anova_table["Margarine", "Df"], ", ", anova_results$anova_table["Margarine", "Df.res"], ") = ",
+  round(anova_results$anova_table["Margarine", "F"], 2), ", p = ", 
+  round(anova_results$anova_table["Margarine", "Pr(>F)"], 3), "). ",
+  "The main effect of Time was ", 
+  ifelse(anova_results$anova_table["Time", "Pr(>F)"] < 0.05, "significant", "not significant"), 
+  " (F(", anova_results$anova_table["Time", "Df"], ", ", anova_results$anova_table["Time", "Df.res"], ") = ",
+  round(anova_results$anova_table["Time", "F"], 2), ", p = ", 
+  round(anova_results$anova_table["Time", "Pr(>F)"], 3), "). ",
+  "The interaction effect between Margarine and Time was ", 
+  ifelse(anova_results$anova_table["Margarine:Time", "Pr(>F)"] < 0.05, "significant", "not significant"), 
+  " (F(", anova_results$anova_table["Margarine:Time", "Df"], ", ", anova_results$anova_table["Margarine:Time", "Df.res"], ") = ",
+  round(anova_results$anova_table["Margarine:Time", "F"], 2), ", p = ", 
+  round(anova_results$anova_table["Margarine:Time", "Pr(>F)"], 3), ")."
+)
+
+apa_report
+```
