@@ -1,0 +1,205 @@
+---
+title: "FA10 Statistical Theory"
+author: "Lindsay Faith Bazar & Jade Marco Morillo"
+date: "November 26, 2004"
+output: 
+  cleanrmd::html_document_clean:
+    theme: kacit
+---
+
+
+```{r}
+data <- read.csv("Cholesterol_R2.csv")
+
+head(data)
+```
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Reshape the data for easier analysis
+
+library(dplyr)
+library(FSA)
+library(tidyr)
+library(ggplot2)
+library(car)
+library(ez)
+library(heplots)
+library(emmeans)
+library(PMCMRplus)
+library(afex) 
+
+data$Margarine <- as.factor(data$Margarine)
+
+cholesterol <- data %>%
+  pivot_longer(cols = Before:After8weeks,
+               names_to = "Time",
+               values_to = "Cholesterol")
+```
+
+## Null Hypothesis ($H_0$)
+There is no significant difference in the cholesterol levels between the two brands of margarine over the three time points.
+
+## Statistical Test: Two-way Mixed ANOVA
+We are interested in examining the interaction between margarine and the cholesterol level over three time points. In this scenario, the most appropriate statistical test would be the **Two-way Mixed Analysis of Variance (ANOVA)**.
+
+Two-way mixed ANOVA allows us to determine whether there are differences between independent groups over time. In this case, we want to find out whether one of two different brands of margarine differs in cholesterol level over time. Therefore:
+
+- The **dependent variable** is *`cholesterol level.`*
+- The **within-subjects factor** is *`time.`*
+- The **between-subjects factor** is the *`brand of margarine.`*
+
+## Assumptions for Two-way Mixed ANOVA
+To run a two-way mixed ANOVA, there are **eight (8) assumptions** that need to be considered:
+
+1. There is **one (1) dependent variable** that is measured at the continuous level (i.e., the interval or ratio level).
+2. There is **one (1) between-subjects factor** that consists of two or more categorical, independent groups.
+3. There is **one (1) within-subjects factor** that consists of two or more categorical, independent groups.
+4. There should be **no significant outliers** in any cell of the design.
+5. The distribution of the dependent variable should be approximately **normally distributed** in every cell of the design.
+6. The **variance** of the dependent variable should be **equal** between the groups of the between-subjects factor, referred to as the assumption of **homogeneity of variances**.
+7. There should be **homogeneity of covariances**.
+8. Lastly, the variance of the differences between groups should be equal, referred to as the **assumption of sphericity**.
+
+## Testing of Assumptions
+
+**Assumption 1**    
+&emsp; The dependent variable, cholesterol level, is measured at the continuous level.
+
+```{r}
+is.numeric(data$Before)
+```
+
+Continuous data typically has decimal values.
+
+```{r}
+any(data$Before %% 1 != 0)
+```
+
+> Therefore, assumption of continuous dependent variable is met. 
+
+**Assumption 2**    
+&emsp; The between-subject factor (brand of margarine) is  categorical with two or more categories.
+
+```{r}
+table(data$Margarine)
+```
+
+> This assumption is satisfied because the margarine brand is a categorical variable with two categories: `Brand A and Brand B.`
+
+**Assumption 3**    
+&emsp; The within-subject factor (time) is categorical with two or more categories.​
+
+```{r}
+levels(as.factor(cholesterol$Time))
+```
+
+> This assumption is also satisfied because the time is a categorical variable with three categories: `the before, after 4 weeks, and after 8 weeks.`
+
+**Assumption 4**   
+&emsp; There should be no significant outliers.
+
+```{r}
+ggplot(cholesterol, aes(x = Time, y = Cholesterol, color = Margarine)) +
+  geom_boxplot() +
+  theme_minimal()
+
+```
+
+We found an outliers in Margarine B, most especially in before time.
+
+Using the IQR rule, the ff are the outliers:
+
+```{r}
+
+outliers <- cholesterol %>%
+  group_by(Time, Margarine) %>%
+  filter(Cholesterol < quantile(Cholesterol, 0.25) - 1.5 * IQR(Cholesterol) |
+         Cholesterol > quantile(Cholesterol, 0.75) + 1.5 * IQR(Cholesterol))
+print(outliers)
+
+```
+
+Let's check if these outliers is significant using z-scores.
+
+A z-score measures how many standard deviations a data point is from the mean. A z-score of |z| > 3 suggests that the observation is more than 3 standard deviations away from the mean, which is rare in a normally distributed dataset (only 0.3% of data points should fall outside this range). Observations with |z| > 3 are considered extreme outliers.
+
+
+
+
+```{r}
+cholesterol <- cholesterol %>%
+  mutate(z_score = (Cholesterol - mean(Cholesterol, na.rm = TRUE)) / sd(Cholesterol, na.rm = TRUE))
+
+significant_outliers <- cholesterol %>% filter(abs(z_score) > 3)
+significant_outliers
+```
+
+**0 rows:** No rows meet the condition for significant outliers (i.e., observations with a z-score greater than 3)
+
+> This suggests that based on the z-score, the cholesterol values in the dataset are not extreme enough to be considered outliers. Therefore, the assumption of no significant outliers is satisfied.
+
+**Assumption 5**   
+&emsp; The dependent variable is normally distributed in every cell of the design,  as assessed by Shapiro-Wilk test of normality, (p > 0.05).
+
+```{r}
+
+cholesterol %>%
+  group_by(Margarine, Time) %>%
+  summarise(p_value = shapiro.test(Cholesterol)$p.value)
+
+```
+
+> All p-values are greater than 0.05 (ranging from 0.134 to 0.400). This means that, based on the Shapiro-Wilk test for normality, the data is normally distributed.
+
+**Assumption 6**  
+&emsp; The variance across margarine groups is equal as assessed by Levene's Test 
+
+```{r}
+leveneTest(Cholesterol ~ Margarine, data = cholesterol)
+```
+
+> With the p=0.002079, the assumption of homogeneity of variances is violated.
+
+
+
+Since the assumption violations were detected (homogeneity of variance),  we will use a non parametric test called `Friedman test` since it does not require the assumption of equal variances and especially because this test is designed for repeated measures or within-subjects data.
+
+
+## Friedman Test
+
+```{r}
+brandA <- cholesterol[cholesterol$Margarine == "A" , ]
+friedman_brandA <- friedman.test(Cholesterol ~ Time | ID, data = brandA)
+
+print(friedman_brandA)
+
+brandB <- cholesterol[cholesterol$Margarine == "B", ]
+friedman_brandB <- friedman.test(Cholesterol ~ Time | ID, data = brandB)
+
+print(friedman_brandB)
+
+```
+
+> Both Brand A and Brand B suggest that time has a statistically significant effect on cholesterol levels for both margarine brands.
+
+To further investigate the nature of these differences, post-hoc pairwise comparisons could be conducted to identify which specific time points differ from each other.
+
+## Post-hoc Comparison Test
+```{r}
+
+if(friedman_brandA$p.value < 0.05) {
+
+  posthoc_A <- dunnTest(Cholesterol ~ Time, data = brandA, method = "bonferroni")
+  print(posthoc_A)
+}
+
+if(friedman_brandB$p.value < 0.05) {
+
+  posthoc_B <- dunnTest(Cholesterol ~ Time, data = brandB, method = "bonferroni")
+  print(posthoc_B)
+}
+
+```
+
+> Despite performing the Dunn's post-hoc test, none of the pairwise comparisons in either brandA or brandB show significant results (all adjusted p-values are high). This suggests that, for both brandA and brandB, there were no statistically significant differences in cholesterol levels between the time points (Before, After4weeks, After8weeks) after correcting for multiple comparisons.
